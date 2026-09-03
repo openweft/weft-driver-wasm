@@ -1,0 +1,139 @@
+name: CI
+
+# This repository had no CI at all: no workflow, so no checks, so every pull
+# request here has reported "no checks" and read as green to anything that
+# asks whether something is failing.
+#
+# The matrix below was MEASURED on this module, not copied. Every pair was
+# cross-built locally first; the blanks are pairs the Go toolchain does not
+# have (there is no darwin/riscv64), not pairs that were skipped. A matrix
+# written from a template lands red on its first run, and a red lane nobody
+# reads is how weft-microvm-agent kept a broken linux build for weeks while
+# darwin and the BSDs went green.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ./...
+      - run: gofmt -l . | tee /tmp/fmt && test ! -s /tmp/fmt
+        if: matrix.os == 'ubuntu-latest'
+      - run: go test -count=1 ./...
+
+  # THIS REPOSITORY IS BELOW THE FLEET STANDARD, WHICH IS 100%.
+  #
+  # It is at 52.2% over the module: 56.9% on builtin/ and 0% on cmd/. The
+  # first floor written here said 56.9 because that is the number `go test`
+  # prints most prominently, and rehearsing the lane locally before shipping
+  # it showed the total is what `go tool cover -func` reports -- 52.2. A gate
+  # keyed to the wrong number would have landed red on its first run.
+  #
+  # Writing the 100% gate today
+  # would make main permanently red, and a lane that can never pass is one
+  # people learn to scroll past -- which costs more than the gate is worth.
+  # Writing no coverage lane at all would hide the gap entirely.
+  #
+  # So: a floor at the number measured on 2026-09-02, which prints the real
+  # figure on every pull request and refuses a regression. THE FLOOR IS NOT
+  # THE STANDARD. It exists to be raised, and the gap to 100 is printed next
+  # to it so nobody can mistake this lane going green for conformance.
+  coverage-floor:
+    name: coverage floor (52.2%, standard is 100%)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: |
+          FLOOR=52.2
+          go test -coverprofile=cover.out ./... >/dev/null
+          go tool cover -func=cover.out
+          cov=$(go tool cover -func=cover.out | tail -1 | awk '{print $3}' | tr -d '%')
+          echo "coverage: ${cov}%  floor: ${FLOOR}%  standard: 100%"
+          awk -v c="$cov" -v f="$FLOOR" 'BEGIN{exit !(c+0 < f+0)}' && {
+            echo "::error::coverage ${cov}% fell below the recorded floor ${FLOOR}%"; exit 1; }
+          awk -v c="$cov" 'BEGIN{if (c+0 < 100) printf "::warning::%.1f points short of the 100%% fleet standard\n", 100-c}'
+
+  race:
+    name: race detector
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -race -count=1 ./...
+
+  # linux carries all six architectures the fleet builds for, s390x included:
+  # this module is wire format, and big-endian is where a wire format that
+  # assumed the machine's byte order stops agreeing with itself.
+  linux-arches:
+    name: build linux/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [amd64, arm64, riscv64, loong64, ppc64le, s390x]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+        run: go build ./...
+
+  # The other operating systems, with the architectures each of them actually
+  # has. freebsd and openbsd carry riscv64; darwin, windows and netbsd do not.
+  other-oses:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [darwin, windows, freebsd, openbsd, netbsd]
+        goarch: [amd64, arm64]
+        include:
+          - goos: freebsd
+            goarch: riscv64
+          - goos: openbsd
+            goarch: riscv64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build ./...

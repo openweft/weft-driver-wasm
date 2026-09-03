@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,8 +128,12 @@ func TestHypervisor_FetchModule_FileURL(t *testing.T) {
 	h := NewHypervisor(Options{HostUUID: "h", Hostname: "h"})
 	vmDir := filepath.Join(dir, "vm-file")
 	spec := drivers.VMSpec{
-		UUID:    vmDir,
-		BootRef: "file://" + src,
+		UUID: vmDir,
+		// The documented form is file:///abs/path -- THREE slashes. Writing
+		// "file://"+src produced that on unix only by accident, because src
+		// starts with a separator there; on Windows src is C:\... and the
+		// result had two, so url.Parse read "C:" as host:port and rejected it.
+		BootRef: fileURL(src),
 	}
 	if err := h.CreateVM(context.Background(), spec); err != nil {
 		t.Fatalf("CreateVM file URL: %v", err)
@@ -220,5 +225,42 @@ func TestHypervisor_AttachDetach_NoOp(t *testing.T) {
 	}
 	if err := h.DetachNIC(ctx, "x", "eth0"); err != nil {
 		t.Errorf("DetachNIC: %v", err)
+	}
+}
+
+// fileURL builds the file:///abs/path form this package documents, from a path
+// in whatever shape the running OS uses.
+func fileURL(path string) string {
+	p := filepath.ToSlash(path)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p // a Windows path starts at its volume: C:/x -> /C:/x
+	}
+	return (&url.URL{Scheme: "file", Path: p}).String()
+}
+
+// filePathFromURL is exercised for BOTH operating systems from one machine,
+// because a conversion tested only where it already works is not tested.
+func TestFilePathFromURL(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, goos, want string
+	}{
+		{"unix", "file:///tmp/x.wasm", "linux", "/tmp/x.wasm"},
+		{"windows volume", "file:///C:/dir/x.wasm", "windows", "C:/dir/x.wasm"},
+		// The same URL under a non-Windows goos keeps its leading slash: this
+		// is what proves the parameter is doing anything at all.
+		{"volume-shaped URL, but not windows", "file:///C:/dir/x.wasm", "linux", "/C:/dir/x.wasm"},
+		// No volume letter, so nothing to strip even on windows.
+		{"windows, no volume", "file:///host/share/x.wasm", "windows", "/host/share/x.wasm"},
+		{"windows, too short to hold a volume", "file:///", "windows", "/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			u, err := url.Parse(tc.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := filePathFromURL(u, tc.goos); got != tc.want {
+				t.Errorf("filePathFromURL(%q, %q) = %q, want %q", tc.raw, tc.goos, got, tc.want)
+			}
+		})
 	}
 }
