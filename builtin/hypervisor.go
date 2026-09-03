@@ -34,6 +34,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -309,6 +310,32 @@ func (h *Hypervisor) AttachNIC(context.Context, string, drivers.NICHandle) error
 }
 func (h *Hypervisor) DetachNIC(context.Context, string, string) error { return nil }
 
+// filePathFromURL turns a file:// URL back into a path the given OS can open.
+//
+// On Windows a file URL is file:///C:/dir/x -- three slashes, forward
+// separators, the volume letter inside the path -- per Microsoft's "File URIs
+// in Windows", which is the form cmd/go/internal/web/url.go produces and the
+// form this package documents. url.Parse hands that path back as "/C:/dir/x",
+// and "/C:/dir/x" names nothing: the leading slash has to come off.
+//
+// Nothing else has to change. The separators can stay as they are, because
+// Windows accepts '/' as a path separator -- os.IsPathSeparator on Windows
+// returns true for both and says so in a comment. Calling filepath.FromSlash
+// here would be worse than useless: it converts to the separator of the
+// HOST the code is running on, so it is a no-op on the machines where this
+// is tested and would have made the branch untestable anywhere but Windows.
+//
+// goos is a parameter rather than a read of runtime.GOOS inside, so both
+// branches are reachable from one machine. A conversion exercised only on the
+// platform it is wrong for is how this stayed broken.
+func filePathFromURL(u *url.URL, goos string) string {
+	p := u.Path
+	if goos == "windows" && len(p) >= 3 && p[0] == '/' && p[2] == ':' {
+		return p[1:]
+	}
+	return p
+}
+
 // fetchModule resolves BootRef + returns the wasm bytes.
 //
 // Supported BootRef forms (V0.1) :
@@ -327,7 +354,7 @@ func (h *Hypervisor) fetchModule(ctx context.Context, ref string) ([]byte, error
 		if err != nil {
 			return nil, err
 		}
-		return os.ReadFile(u.Path)
+		return os.ReadFile(filePathFromURL(u, runtime.GOOS))
 	case strings.HasPrefix(ref, "http://"), strings.HasPrefix(ref, "https://"):
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ref, nil)
 		if err != nil {
