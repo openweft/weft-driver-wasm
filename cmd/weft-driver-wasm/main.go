@@ -13,8 +13,8 @@ import (
 	"os"
 	"strconv"
 
-	wasmdriver "github.com/openweft/weft-driver-wasm/builtin"
 	weftplugin "github.com/openweft/weft-driver-plugin"
+	wasmdriver "github.com/openweft/weft-driver-wasm/builtin"
 	weftslognats "github.com/openweft/weft-slognats"
 )
 
