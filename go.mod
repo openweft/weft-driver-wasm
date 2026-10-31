@@ -1,6 +1,6 @@
 module github.com/openweft/weft-driver-wasm
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/openweft/weft-driver-plugin v0.4.2
