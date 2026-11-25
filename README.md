@@ -4,6 +4,15 @@ WebAssembly hypervisor driver for [openweft](https://github.com/openweft).
 
 Turns any host running `weft-agent` into a hypervisor for WASI workloads — no KVM, no Apple VZ, no nested virtualisation required. Pure Go, embeds [wazero](https://wazero.io/), runs on every architecture openweft targets (amd64 / arm64 / riscv64 / loongarch64).
 
+## Secrets are refused
+
+This driver has no vsock channel, so it cannot deliver a guest secret
+(WireGuard private key, CubeFS access/secret keys, inline or by `*_ref`)
+safely, and it never falls back to inlining one. `CreateVM` returns
+`ErrSecretsUnsupported` when the spec's free-form fields (`Cmdline`,
+`Name`) carry a secret-named key or a raw WireGuard key. Use a driver with
+a vsock channel for workloads that need secrets.
+
 ## Why
 
 The classic openweft drivers (`weft-driver-vz`, `weft-driver-qemu`, `weft-driver-vmd`, `weft-driver-dcs`) each need a real hypervisor on the host. This excludes :
