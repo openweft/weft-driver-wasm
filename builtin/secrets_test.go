@@ -2,6 +2,8 @@ package builtin
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -41,8 +43,12 @@ func TestRejectSecrets(t *testing.T) {
 
 func TestCreateVMRefusesSecrets(t *testing.T) {
 	h := NewHypervisor(Options{HostUUID: "h", Hostname: "h"})
-	err := h.CreateVM(t.Context(), drivers.VMSpec{UUID: "u", Cmdline: "secret_key=abc"})
+	dir := filepath.Join(t.TempDir(), "vm")
+	err := h.CreateVM(t.Context(), drivers.VMSpec{UUID: dir, Cmdline: "secret_key=abc"})
 	if !errors.Is(err, ErrSecretsUnsupported) {
 		t.Fatalf("CreateVM err = %v, want ErrSecretsUnsupported", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("a refused spec created its VM dir: %v", err)
 	}
 }
