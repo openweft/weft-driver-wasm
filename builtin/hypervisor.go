@@ -132,6 +132,9 @@ func (h *Hypervisor) HostInfo(context.Context) (drivers.HostInfo, error) {
 //     (the BootKind enum doesn't yet have a "wasm" entry ; V0.1 is
 //     forgiving).
 func (h *Hypervisor) CreateVM(ctx context.Context, spec drivers.VMSpec) error {
+	if err := RejectSecrets(spec); err != nil {
+		return err
+	}
 	vmDir := spec.UUID
 	if vmDir == "" {
 		return fmt.Errorf("wasm CreateVM: empty VM uuid/dir")
